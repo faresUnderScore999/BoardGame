@@ -134,7 +134,8 @@ async function initDB() {
 
 // Socket.io logic
 const rooms = new Map() // gameId -> { game, players: Map }
-
+app.get('/health', (req, res) => res.json({ status: 'ok' }))
+app.get('*', (req, res) => res.sendFile(join(__dirname, '..', 'dist', 'index.html')))
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id)
 
@@ -366,28 +367,38 @@ io.on('connection', (socket) => {
         return
       }
 
+      // Update players array after any movement
       game.players = Array.from(roomData.players.entries()).map(([id, p]) => ({
         id,
         nickname: p.nickname,
         position: p.position,
       }))
 
-      // Advance turn
-      const currentTurnIdx = game.players.findIndex((p) => p.id === playerId)
-      let nextTurnIdx = (currentTurnIdx + 1) % game.players.length
-      for (let i = 0; i < game.players.length; i++) {
-        const candidate = (currentTurnIdx + 1 + i) % game.players.length
-        if (game.players[candidate].position < 63) {
-          nextTurnIdx = candidate
-          break
-        }
+      // Check for Roll again
+      let extraRoll = false
+      if (tileText === 'Roll again') {
+        extraRoll = true
       }
 
-      game.currentTurn = game.players[nextTurnIdx].id
-      await pool.query('UPDATE games SET current_turn = $1, updated_at = NOW() WHERE id = $2', [
-        game.currentTurn,
-        gameId,
-      ])
+      // If not extra roll, then advance the turn
+      if (!extraRoll) {
+        // Advance turn
+        const currentTurnIdx = game.players.findIndex((p) => p.id === playerId)
+        let nextTurnIdx = (currentTurnIdx + 1) % game.players.length
+        for (let i = 0; i < game.players.length; i++) {
+          const candidate = (currentTurnIdx + 1 + i) % game.players.length
+          if (game.players[candidate].position < 63) {
+            nextTurnIdx = candidate
+            break
+          }
+        }
+
+        game.currentTurn = game.players[nextTurnIdx].id
+        await pool.query('UPDATE games SET current_turn = $1, updated_at = NOW() WHERE id = $2', [
+          game.currentTurn,
+          gameId,
+        ])
+      }
 
       rooms.set(gameId, roomData)
 
@@ -408,9 +419,6 @@ io.on('connection', (socket) => {
   socket.on('disconnect', async () => {
     console.log('Client disconnected:', socket.id)
   })
-
-  app.get('/health', (req, res) => res.json({ status: 'ok' }))
-  app.get('*', (req, res) => res.sendFile(join(__dirname, '..', 'dist', 'index.html')))
 })
 
 initDB().then(() => {
